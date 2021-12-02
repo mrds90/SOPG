@@ -71,3 +71,4 @@ myfifo
 uncrustify.cfg
 writer
 reader
+serialService

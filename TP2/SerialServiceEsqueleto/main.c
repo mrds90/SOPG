@@ -127,63 +127,10 @@ int main(void) {
 
 
     printf("Inicio Serial Service\r\n");
-    BlockSignals();
-    pthread_t thread_serial;
-    int ret = pthread_create(&thread_serial, NULL, SerialManager, &lines);
-    if (ret != 0) {
-        perror("pthread_create");
-        exit(EXIT_FAILURE);
-    }
-    pthread_t thread_interface;
-    ret = pthread_create(&thread_interface, NULL, InterfaceManager, &lines);
-    if (ret != 0) {
-        perror("pthread_create");
-        exit(EXIT_FAILURE);
-    }
-    UnblockSignals();
-    while (1) {
-        sleep(1);
-    }
 
 
-    exit(EXIT_SUCCESS);
-    return 0;
-}
-
-//======[Thread Functions Implementation]========================================
-void*SerialManager(void *arg) {
-    state_t *lines = (state_t *) arg;
-    char buffer_ciaa_down[BUFFER_SIZE_CIAA_DOWN];
-    if (!serial_open(1, BAUD_RATE_CIAA)) {
-        while (1) {
-            snprintf(buffer_ciaa_down, BUFFER_SIZE_CIAA_DOWN, BUFFER_CIAA_DOWN_FORMAT, lines[LINE_A], lines[LINE_B], lines[LINE_C], lines[LINE_D]);
-            serial_send(buffer_ciaa_down, BUFFER_SIZE_CIAA_DOWN + 1);
-            usleep(200000);
-            char buffer_ciaa_up[BUFFER_SIZE_CIAA_UP];
-            memset(buffer_ciaa_up, 0, BUFFER_SIZE_CIAA_UP + 1);
-            if (serial_receive(buffer_ciaa_up, BUFFER_SIZE_CIAA_UP) > 0) {
-                printf("%s", buffer_ciaa_up);
-                if (strlen(buffer_ciaa_up) >= sizeof(BUFFER_CIAA_UP_INIT)) {
-                    toggle_line = CHAR_TO_INT(buffer_ciaa_up[14]);
-                    printf("Toggle line: %d\r\n", toggle_line);
-                    toggle_flag = TRUE;
-                }
-            }
-
-            usleep(200000);
-        }
-    }
-    return NULL;
-}
-
-void*InterfaceManager(void *arg) {
-    state_t *lines = (state_t *) arg;
-    socklen_t address_length;
+    struct sockaddr_in address_server;
     
-    struct sockaddr_in address_client, address_server;
-    char data_down[BUFFER_SIZE_INTERFASE_DOWN];
-
-
     socket_fd = socket(AF_INET, SOCK_STREAM, 0); // Create the socket
     if (socket_fd == ERROR) {
         perror("socket");
@@ -211,12 +158,57 @@ void*InterfaceManager(void *arg) {
         exit(EXIT_FAILURE);
     }
 
+    BlockSignals();
     pthread_t thread_interface;
-    int ret = pthread_create(&thread_interface, NULL, InterfaceManagerSend, NULL);
+    int ret = pthread_create(&thread_interface, NULL, InterfaceManager, &lines);
     if (ret != 0) {
         perror("pthread_create");
         exit(EXIT_FAILURE);
     }
+    UnblockSignals();
+
+
+    char buffer_ciaa_down[BUFFER_SIZE_CIAA_DOWN];
+    if (!serial_open(1, BAUD_RATE_CIAA)) {
+        while (1) {
+            snprintf(buffer_ciaa_down, BUFFER_SIZE_CIAA_DOWN, BUFFER_CIAA_DOWN_FORMAT, lines[LINE_A], lines[LINE_B], lines[LINE_C], lines[LINE_D]);
+            serial_send(buffer_ciaa_down, BUFFER_SIZE_CIAA_DOWN + 1);
+            usleep(200000);
+            char buffer_ciaa_up[BUFFER_SIZE_CIAA_UP];
+            memset(buffer_ciaa_up, 0, BUFFER_SIZE_CIAA_UP + 1);
+            if (serial_receive(buffer_ciaa_up, BUFFER_SIZE_CIAA_UP) > 0) {
+                printf("%s", buffer_ciaa_up);
+                if (strlen(buffer_ciaa_up) >= sizeof(BUFFER_CIAA_UP_INIT)) {
+                    toggle_line = CHAR_TO_INT(buffer_ciaa_up[14]);
+                    printf("Toggle line: %d\r\n", toggle_line);
+                    toggle_flag = TRUE;
+                }
+            }
+
+            char data_up [BUFFER_SIZE_INTERFASE_UP] = BUFFER_INTERFASE_UP;
+            data_up[5] = INT_TO_CHAR(toggle_line);
+            if (toggle_flag == TRUE) {
+                toggle_flag = FALSE;
+                if (write(socket_descriptor, data_up, BUFFER_SIZE_INTERFASE_UP) == ERROR) {
+                    perror("write");
+                    exit(EXIT_FAILURE);
+                }
+            }
+        }
+    }
+
+
+    exit(EXIT_SUCCESS);
+    return 0;
+}
+
+//======[Thread Functions Implementation]========================================
+
+void*InterfaceManager(void *arg) {
+    state_t *lines = (state_t *) arg;
+    struct sockaddr_in address_client;
+    char data_down[BUFFER_SIZE_INTERFASE_DOWN];
+    socklen_t address_length;
 
     while (1) {
         address_length = sizeof(struct sockaddr_in);
@@ -234,30 +226,13 @@ void*InterfaceManager(void *arg) {
             }
             data_down[read_bytes] = 0;
             printf("%d bytes received with %s\n", read_bytes, data_down);
-            //TODO: Critical section:
             lines[LINE_A] = CHAR_TO_INT(data_down[7]);
             lines[LINE_B] = CHAR_TO_INT(data_down[8]);
             lines[LINE_C] = CHAR_TO_INT(data_down[9]);
             lines[LINE_D] = CHAR_TO_INT(data_down[10]);
-            //TODO: End critical section
         }
 
         close(socket_fd);
-        usleep(200000);
-    }
-}
-
-void*InterfaceManagerSend(void *arg) {
-    char data_up [BUFFER_SIZE_INTERFASE_UP] = BUFFER_INTERFASE_UP;
-    while (TRUE) {
-        data_up[5] = INT_TO_CHAR(toggle_line);
-        if (toggle_flag == TRUE) {
-            toggle_flag = FALSE;
-            if (write(socket_descriptor, data_up, BUFFER_SIZE_INTERFASE_UP) == ERROR) {
-                perror("write");
-                exit(EXIT_FAILURE);
-            }
-        }
         usleep(200000);
     }
 }
@@ -277,6 +252,7 @@ static void BlockSignals(void) {
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGINT);
+    sigaddset(&set, SIGTERM); // TODO: Check if this is correct
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 }
 
@@ -284,5 +260,6 @@ void UnblockSignals(void) {
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGINT);
+    sigaddset(&set, SIGTERM); // TODO: Check if this is correct
     pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 }

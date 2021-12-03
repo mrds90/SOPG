@@ -30,15 +30,17 @@
 
 #define PORT_SERVER                    "127.0.0.1"
 
-#define BAUD_RATE_CIAA             115200
-#define SINGAL_ERROR               -1
-#define ERROR                      -1
+#define LINE_TOGLE_POSITION           14
+#define LINE_INFO_POSITION            7
+#define BAUD_RATE_CIAA                115200
+#define SINGAL_ERROR                  -1
+#define ERROR                         -1
 
-#define TRUE                       1
-#define FALSE                      0
+#define TRUE                          1
+#define FALSE                         0
 
-#define CHAR_TO_INT(c)             ((int)c - '0')
-#define INT_TO_CHAR(i)             ((char)(i + '0'))
+#define CHAR_TO_INT(c)                ((int)c - '0')
+#define INT_TO_CHAR(i)                ((char)(i + '0'))
 typedef enum {
     LINE_A,
     LINE_B,
@@ -104,6 +106,7 @@ static int toggle_line = 0;
 static int socket_fd = 0;
 static uint8_t toggle_flag = FALSE;
 static int socket_descriptor;
+static pthread_t thread_interface;
 
 int main(void) {
     struct sigaction sa1;
@@ -130,7 +133,7 @@ int main(void) {
 
 
     struct sockaddr_in address_server;
-    
+
     socket_fd = socket(AF_INET, SOCK_STREAM, 0); // Create the socket
     if (socket_fd == ERROR) {
         perror("socket");
@@ -159,7 +162,7 @@ int main(void) {
     }
 
     BlockSignals();
-    pthread_t thread_interface;
+
     int ret = pthread_create(&thread_interface, NULL, InterfaceManager, &lines);
     if (ret != 0) {
         perror("pthread_create");
@@ -173,13 +176,15 @@ int main(void) {
         while (1) {
             snprintf(buffer_ciaa_down, BUFFER_SIZE_CIAA_DOWN, BUFFER_CIAA_DOWN_FORMAT, lines[LINE_A], lines[LINE_B], lines[LINE_C], lines[LINE_D]);
             serial_send(buffer_ciaa_down, BUFFER_SIZE_CIAA_DOWN + 1);
-            usleep(200000);
+
+            usleep(10000);
+
             char buffer_ciaa_up[BUFFER_SIZE_CIAA_UP];
             memset(buffer_ciaa_up, 0, BUFFER_SIZE_CIAA_UP + 1);
             if (serial_receive(buffer_ciaa_up, BUFFER_SIZE_CIAA_UP) > 0) {
                 printf("%s", buffer_ciaa_up);
                 if (strlen(buffer_ciaa_up) >= sizeof(BUFFER_CIAA_UP_INIT)) {
-                    toggle_line = CHAR_TO_INT(buffer_ciaa_up[14]);
+                    toggle_line = CHAR_TO_INT(buffer_ciaa_up[LINE_TOGLE_POSITION]);
                     printf("Toggle line: %d\r\n", toggle_line);
                     toggle_flag = TRUE;
                 }
@@ -219,27 +224,23 @@ void*InterfaceManager(void *arg) {
         printf("server connected from  %s\n", inet_ntoa(address_client.sin_addr));
 
         int read_bytes;
-        while (TRUE) {
-            if ((read_bytes = read(socket_descriptor, data_down, 128)) == ERROR) {
-                perror("read");
-                exit(EXIT_FAILURE);
-            }
+        while (((read_bytes = read(socket_descriptor, data_down, 128)) != ERROR)) {
             data_down[read_bytes] = 0;
             printf("%d bytes received with %s\n", read_bytes, data_down);
-            lines[LINE_A] = CHAR_TO_INT(data_down[7]);
-            lines[LINE_B] = CHAR_TO_INT(data_down[8]);
-            lines[LINE_C] = CHAR_TO_INT(data_down[9]);
-            lines[LINE_D] = CHAR_TO_INT(data_down[10]);
+            lines[LINE_A] = CHAR_TO_INT(data_down[LINE_INFO_POSITION + LINE_A]);
+            lines[LINE_B] = CHAR_TO_INT(data_down[LINE_INFO_POSITION + LINE_B]);
+            lines[LINE_C] = CHAR_TO_INT(data_down[LINE_INFO_POSITION + LINE_C]);
+            lines[LINE_D] = CHAR_TO_INT(data_down[LINE_INFO_POSITION + LINE_D]);
         }
 
-        close(socket_fd);
-        usleep(200000);
+        close(socket_descriptor);
     }
 }
 
 //======[Private Functions Implementation]=====================================
 static void SignalHandler(int signum) {
     if (signum == SIGTERM || signum == SIGINT) {
+        //TODO: Close the thread
         printf("\n\rSignal %d received\n\r", signum);
         serial_close();
         close(socket_fd);
@@ -252,7 +253,7 @@ static void BlockSignals(void) {
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGINT);
-    sigaddset(&set, SIGTERM); // TODO: Check if this is correct
+    sigaddset(&set, SIGTERM);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 }
 
@@ -260,6 +261,6 @@ void UnblockSignals(void) {
     sigset_t set;
     sigemptyset(&set);
     sigaddset(&set, SIGINT);
-    sigaddset(&set, SIGTERM); // TODO: Check if this is correct
+    sigaddset(&set, SIGTERM);
     pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 }

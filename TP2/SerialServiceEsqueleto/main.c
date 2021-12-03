@@ -224,7 +224,7 @@ void*InterfaceManager(void *arg) {
         printf("server connected from  %s\n", inet_ntoa(address_client.sin_addr));
 
         int read_bytes;
-        while (((read_bytes = read(socket_descriptor, data_down, 128)) != ERROR)) {
+        while (((read_bytes = read(socket_descriptor, data_down, 128)) != ERROR) && (read_bytes > 0)) {
             data_down[read_bytes] = 0;
             printf("%d bytes received with %s\n", read_bytes, data_down);
             lines[LINE_A] = CHAR_TO_INT(data_down[LINE_INFO_POSITION + LINE_A]);

@@ -105,8 +105,11 @@ void UnblockSignals(void);
 static int toggle_line = 0;
 static int socket_fd = 0;
 static uint8_t toggle_flag = FALSE;
+static uint8_t socket_descriptor_flag = FALSE;
 static int socket_descriptor;
 static pthread_t thread_interface;
+volatile sig_atomic_t end_system = FALSE;
+static pthread_mutex_t mutexData = PTHREAD_MUTEX_INITIALIZER;
 
 int main(void) {
     struct sigaction sa1;
@@ -174,7 +177,10 @@ int main(void) {
     char buffer_ciaa_down[BUFFER_SIZE_CIAA_DOWN];
     if (!serial_open(1, BAUD_RATE_CIAA)) {
         while (1) {
+            pthread_mutex_lock(&mutexData);
             snprintf(buffer_ciaa_down, BUFFER_SIZE_CIAA_DOWN, BUFFER_CIAA_DOWN_FORMAT, lines[LINE_A], lines[LINE_B], lines[LINE_C], lines[LINE_D]);
+            pthread_mutex_unlock(&mutexData);
+
             serial_send(buffer_ciaa_down, BUFFER_SIZE_CIAA_DOWN + 1);
 
             usleep(10000);
@@ -194,16 +200,40 @@ int main(void) {
             data_up[5] = INT_TO_CHAR(toggle_line);
             if (toggle_flag == TRUE) {
                 toggle_flag = FALSE;
-                if (write(socket_descriptor, data_up, BUFFER_SIZE_INTERFASE_UP) == ERROR) {
-                    perror("write");
-                    exit(EXIT_FAILURE);
+
+                pthread_mutex_lock(&mutexData);
+                if (socket_descriptor_flag) {
+                    if (write(socket_descriptor, data_up, BUFFER_SIZE_INTERFASE_UP) == ERROR) {
+                        perror("write");
+                        exit(EXIT_FAILURE);
+                    }
                 }
+                pthread_mutex_unlock(&mutexData);
+            }
+            if(end_system == TRUE) {
+                break;
             }
         }
     }
 
+    
+    if(end_system == TRUE) {   
+        void *thread_cancel;
+        printf("%s", "Close all the resources");
+        pthread_cancel(thread_interface);
+        pthread_join(thread_interface, &thread_cancel);
+	    if(thread_cancel == PTHREAD_CANCELED) {
+            printf("%s", "Thread was canceled\r\n");
+        }
+        else {
+            printf("%s", "Thread ended\r\n");
+        }
+        serial_close();
+        close(socket_fd);
+        close(socket_descriptor);
+        exit(EXIT_SUCCESS);
+    }
 
-    exit(EXIT_SUCCESS);
     return 0;
 }
 
@@ -221,30 +251,40 @@ void*InterfaceManager(void *arg) {
             perror("accept");
             exit(EXIT_FAILURE);
         }
+        else {
+            pthread_mutex_lock(&mutexData);
+            socket_descriptor_flag = TRUE;
+            pthread_mutex_unlock(&mutexData);
+        }
         printf("server connected from  %s\n", inet_ntoa(address_client.sin_addr));
 
         int read_bytes;
         while (((read_bytes = read(socket_descriptor, data_down, 128)) != ERROR) && (read_bytes > 0)) {
             data_down[read_bytes] = 0;
             printf("%d bytes received with %s\n", read_bytes, data_down);
+            pthread_mutex_lock(&mutexData);
             lines[LINE_A] = CHAR_TO_INT(data_down[LINE_INFO_POSITION + LINE_A]);
             lines[LINE_B] = CHAR_TO_INT(data_down[LINE_INFO_POSITION + LINE_B]);
             lines[LINE_C] = CHAR_TO_INT(data_down[LINE_INFO_POSITION + LINE_C]);
             lines[LINE_D] = CHAR_TO_INT(data_down[LINE_INFO_POSITION + LINE_D]);
+            pthread_mutex_unlock(&mutexData);
         }
+
+        pthread_mutex_lock(&mutexData);
+        socket_descriptor_flag = FALSE;
+        pthread_mutex_unlock(&mutexData);
 
         close(socket_descriptor);
     }
 }
 
 //======[Private Functions Implementation]=====================================
+
 static void SignalHandler(int signum) {
     if (signum == SIGTERM || signum == SIGINT) {
         //TODO: Close the thread
         printf("\n\rSignal %d received\n\r", signum);
-        serial_close();
-        close(socket_fd);
-        close(socket_descriptor);
+        end_system = TRUE;
         exit(EXIT_SUCCESS);
     }
 }
@@ -252,15 +292,15 @@ static void SignalHandler(int signum) {
 static void BlockSignals(void) {
     sigset_t set;
     sigemptyset(&set);
-    sigaddset(&set, SIGINT);
     sigaddset(&set, SIGTERM);
+    sigaddset(&set, SIGINT);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 }
 
 void UnblockSignals(void) {
     sigset_t set;
     sigemptyset(&set);
-    sigaddset(&set, SIGINT);
     sigaddset(&set, SIGTERM);
+    sigaddset(&set, SIGINT);
     pthread_sigmask(SIG_UNBLOCK, &set, NULL);
 }

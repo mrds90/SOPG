@@ -219,7 +219,7 @@ int main(void) {
     
     if(end_system == TRUE) {   
         void *thread_cancel;
-        printf("%s", "Close all the resources");
+        printf("%s", "Close all the resources\r\n");
         pthread_cancel(thread_interface);
         pthread_join(thread_interface, &thread_cancel);
 	    if(thread_cancel == PTHREAD_CANCELED) {
@@ -282,10 +282,8 @@ void*InterfaceManager(void *arg) {
 
 static void SignalHandler(int signum) {
     if (signum == SIGTERM || signum == SIGINT) {
-        //TODO: Close the thread
         printf("\n\rSignal %d received\n\r", signum);
         end_system = TRUE;
-        exit(EXIT_SUCCESS);
     }
 }
 

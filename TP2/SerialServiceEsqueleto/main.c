@@ -58,12 +58,6 @@ typedef enum {
     STATE_QTY,
 } state_t;
 //======[Thread Functions Declarations]========================================
-/**
- * @brief Thread to read the serial port and send the data to the CIAA
- *
- * @param arg
- */
-void*SerialManager(void *arg);
 
 /**
  * @brief Create the thread to manage the socket TCP
@@ -72,14 +66,6 @@ void*SerialManager(void *arg);
  * @return void*
  */
 void*InterfaceManager(void *arg);
-
-/**
- * @brief Send the data to the socket TCP
- *
- * @param arg
- * @return void*
- */
-void*InterfaceManagerSend(void *arg);
 
 //======[Private Functions Declarations]=======================================
 /**
@@ -222,7 +208,7 @@ int main(void) {
         printf("%s", "Close all the resources\r\n");
         pthread_cancel(thread_interface);
         pthread_join(thread_interface, &thread_cancel);
-	    if(thread_cancel == PTHREAD_CANCELED) {
+	if(thread_cancel == PTHREAD_CANCELED) {
             printf("%s", "Thread was canceled\r\n");
         }
         else {
